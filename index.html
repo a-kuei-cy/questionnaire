@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG 任務結算與教師後台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'DotGothic16', 'Courier New', monospace;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            background-image: radial-gradient(#2a2a4e 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        /* 隱藏與顯示區塊 */
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.3s ease-in; }
+        .step-content { display: none; animation: fadeIn 0.3s steps(5, end); }
+        .step-content.active { display: block; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* 共用 UI */
+        .rpg-box {
+            background-color: #000;
+            border: 4px solid #fff;
+            border-radius: 4px;
+            box-shadow: 4px 4px 0px #000, inset 2px 2px 0px rgba(255,255,255,0.2);
+        }
+        .rpg-input {
+            background-color: #111;
+            border: 2px solid #555;
+            color: #fff;
+        }
+        .rpg-input:focus { border-color: #fbbf24; outline: none; }
+        .rpg-btn {
+            background-color: #000;
+            border: 2px solid #fff;
+            color: #fff;
+            text-transform: uppercase;
+            transition: all 0.1s;
+        }
+        .rpg-btn:hover:not(:disabled) { background-color: #fff; color: #000; }
+        .rpg-btn:active:not(:disabled) { transform: translateY(2px); }
+        .rpg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* RPG 像素風單選按鈕 */
+        .rating-radio:checked + label {
+            background-color: #fbbf24;
+            color: #000;
+            border-color: #fbbf24;
+            box-shadow: 0 0 10px #fbbf24;
+        }
+
+        /* 後台表格樣式 */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #444; padding: 8px; text-align: left; }
+        th { background-color: #333; color: #fbbf24; }
+        tr:nth-child(even) { background-color: #111; }
+        tr:hover { background-color: #222; }
+
+        /* Modal 樣式 */
+        .modal {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.8);
+            justify-content: center; align-items: center;
+            z-index: 50;
+        }
+        .modal.active { display: flex; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4">
+
+    <!-- 模式切換導覽列 -->
+    <div class="max-w-6xl mx-auto w-full mb-4 flex justify-end space-x-4">
+        <button id="nav-frontend" class="text-sm rpg-btn px-3 py-1 bg-yellow-900 text-yellow-400 border-yellow-400">⚔️ 勇者填寫區</button>
+        <button id="nav-backend" class="text-sm rpg-btn px-3 py-1">👑 教師管理後台</button>
+    </div>
+
+    <!-- ==================== 前台：問卷填寫區 ==================== -->
+    <div id="frontend-view" class="view-section active flex-grow flex items-center justify-center">
+        <div class="max-w-2xl w-full rpg-box p-6 sm:p-8 relative">
+            <!-- Header -->
+            <div class="text-center mb-6 border-b-2 border-gray-600 pb-4">
+                <h1 class="text-2xl sm:text-3xl font-bold text-yellow-400 mb-2">⚔️ 教師研習：任務結算 ⚔️</h1>
+                <p class="text-gray-400">系統提示：請如實填寫您的冒險紀錄</p>
+            </div>
+
+            <!-- EXP Bar (Progress) -->
+            <div id="progressContainer" class="mb-8">
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="text-yellow-400">Lv.1 菜鳥勇者</span>
+                    <span id="expText" class="text-yellow-400">EXP: 0%</span>
+                </div>
+                <div class="w-full h-4 bg-gray-800 border-2 border-gray-600 p-0.5">
+                    <div id="progressBar" class="h-full bg-yellow-400 transition-all duration-300" style="width: 0%;"></div>
+                </div>
+                <div class="flex justify-between mt-2 text-xs text-gray-600 font-bold">
+                    <span id="indicator-1" class="text-yellow-400">CH.1 登錄</span>
+                    <span id="indicator-2">CH.2 評價</span>
+                    <span id="indicator-3">CH.3 筆記</span>
+                </div>
+            </div>
+
+            <!-- Form Content -->
+            <form id="feedbackForm">
+                
+                <!-- Step 1: 基本資料 -->
+                <div class="step-content active" id="step-1">
+                    <h2 class="text-xl text-yellow-400 mb-6">▶ 第一章：冒險者身分確認</h2>
+                    
+                    <div class="space-y-5">
+                        <div>
+                            <label class="block mb-2">🗡️ 勇者代號 (姓名) <span class="text-red-500">*</span></label>
+                            <input type="text" id="userName" required class="w-full p-3 rpg-input" placeholder="請輸入名字...">
+                        </div>
+                        
+                        <div>
+                            <label class="block mb-2">🏰 任教學校 <span class="text-red-500">*</span></label>
+                            <input type="text" id="schoolName" required class="w-full p-3 rpg-input" placeholder="例如：新手村國民中學">
+                        </div>
+
+                        <div>
+                            <label class="block mb-2">🧙‍♂️ 職業天賦 (任教領域)</label>
+                            <select id="subject" class="w-full p-3 rpg-input cursor-pointer">
+                                <option value="" class="bg-black">-- 選擇職業 --</option>
+                                <option value="國語文" class="bg-black">國語文 (吟遊詩人)</option>
+                                <option value="英語文" class="bg-black">英語文 (精靈使)</option>
+                                <option value="數學" class="bg-black">數學 (鍊金術師)</option>
+                                <option value="自然科學" class="bg-black">自然科學 (魔法師)</option>
+                                <option value="社會" class="bg-black">社會 (考古學者)</option>
+                                <option value="科技" class="bg-black">科技 (機關工匠)</option>
+                                <option value="藝術" class="bg-black">藝術 (幻象大師)</option>
+                                <option value="綜合活動" class="bg-black">綜合活動 (遊俠)</option>
+                                <option value="健康與體育" class="bg-black">健康與體育 (狂戰士)</option>
+                                <option value="其他" class="bg-black">其他 (隱藏職業)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: 滿意度評估 -->
+                <div class="step-content" id="step-2">
+                    <h2 class="text-xl text-yellow-400 mb-4">▶ 第二章：任務結算評分</h2>
+                    <p class="text-gray-400 mb-6 text-sm">系統提示：請為本次副本進行評級 (5星最高)。</p>
+                    
+                    <div class="space-y-8">
+                        <div>
+                            <label class="block mb-3">📜 1. 魔法卷軸實用度 (研習內容)</label>
+                            <div class="flex space-x-2 sm:space-x-4">
+                                <script>
+                                    for(let i=1; i<=5; i++) {
+                                        document.write(`
+                                            <div>
+                                                <input type="radio" name="ratingContent" id="content-${i}" value="${i}" class="hidden rating-radio" required>
+                                                <label for="content-${i}" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center border-2 border-gray-600 cursor-pointer hover:bg-gray-800 text-gray-300 font-bold transition-colors duration-200">${i}</label>
+                                            </div>
+                                        `);
+                                    }
+                                </script>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block mb-3">🗣️ 2. NPC導覽清晰度 (講師表達)</label>
+                            <div class="flex space-x-2 sm:space-x-4">
+                                <script>
+                                    for(let i=1; i<=5; i++) {
+                                        document.write(`
+                                            <div>
+                                                <input type="radio" name="ratingSpeaker" id="speaker-${i}" value="${i}" class="hidden rating-radio" required>
+                                                <label for="speaker-${i}" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center border-2 border-gray-600 cursor-pointer hover:bg-gray-800 text-gray-300 font-bold transition-colors duration-200">${i}</label>
+                                            </div>
+                                        `);
+                                    }
+                                </script>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block mb-3">⛺ 3. 旅館與營地設施 (場地行政)</label>
+                            <div class="flex space-x-2 sm:space-x-4">
+                                <script>
+                                    for(let i=1; i<=5; i++) {
+                                        document.write(`
+                                            <div>
+                                                <input type="radio" name="ratingVenue" id="venue-${i}" value="${i}" class="hidden rating-radio" required>
+                                                <label for="venue-${i}" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center border-2 border-gray-600 cursor-pointer hover:bg-gray-800 text-gray-300 font-bold transition-colors duration-200">${i}</label>
+                                            </div>
+                                        `);
+                                    }
+                                </script>
+                            </div>
+                        </div>
+                        <p id="ratingWarning" class="text-red-500 text-sm hidden font-bold mt-2">⚠️ 系統警告：有未完成的評分項目！</p>
+                    </div>
+                </div>
+
+                <!-- Step 3: 心得與回饋 -->
+                <div class="step-content" id="step-3">
+                    <h2 class="text-xl text-yellow-400 mb-6">▶ 第三章：冒險者手札</h2>
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block mb-2">💎 本次任務獲得的最珍貴寶物？ (最有幫助的部分)</label>
+                            <textarea id="feedbackHelpful" rows="3" class="w-full p-3 rpg-input resize-none" placeholder="裝備、技能或知識..."></textarea>
+                        </div>
+                        <div>
+                            <label class="block mb-2">🗺️ 下一步想開啟的地圖或副本？ (未來研習建議)</label>
+                            <textarea id="feedbackFuture" rows="3" class="w-full p-3 rpg-input resize-none" placeholder="寫下未來的期望..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Success Screen -->
+                <div class="step-content text-center py-10" id="step-success">
+                    <div class="text-6xl mb-6">🏆</div>
+                    <h2 class="text-3xl font-bold text-yellow-400 mb-2">QUEST CLEARED!</h2>
+                    <p class="text-gray-300 mb-8 leading-relaxed">任務回報成功！獲得經驗值 +1000<br>感謝教師您的參與與付出。</p>
+                    <button type="button" onclick="location.reload()" class="rpg-btn px-6 py-3 font-bold text-lg">▶ 接受新任務</button>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-8 flex justify-between border-t-2 border-gray-700 pt-6" id="action-buttons">
+                    <button type="button" id="prevBtn" class="rpg-btn px-6 py-2 hidden">◄ 返回</button>
+                    <div class="flex-grow"></div>
+                    <button type="button" id="nextBtn" class="rpg-btn px-6 py-2">繼續 ►</button>
+                    <button type="submit" id="submitBtn" class="rpg-btn px-6 py-2 hidden flex items-center text-yellow-400 border-yellow-400 hover:bg-yellow-400 hover:text-black">
+                        <span id="submitText">💾 儲存並回報</span>
+                        <svg id="loadingIcon" class="animate-spin ml-2 h-5 w-5 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================== 後台：教師管理 Dashboard ==================== -->
+    <div id="backend-view" class="view-section flex-grow">
+        <div class="max-w-6xl mx-auto rpg-box p-6">
+            <div class="flex justify-between items-center mb-6 border-b-2 border-gray-600 pb-4">
+                <h1 class="text-3xl font-bold text-yellow-400">👑 教師管理中心 (儀表板)</h1>
+                <div id="dashboardStatus" class="text-sm text-gray-400">連線中...</div>
+            </div>
+
+            <!-- 圖表區 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <!-- 評分雷達圖/長條圖 -->
+                <div class="rpg-box p-4 bg-gray-900">
+                    <h3 class="text-xl text-center mb-2 text-yellow-400">📊 各項任務平均滿意度</h3>
+                    <div class="h-64"><canvas id="ratingChart"></canvas></div>
+                </div>
+                <!-- 職業圓餅圖 -->
+                <div class="rpg-box p-4 bg-gray-900">
+                    <h3 class="text-xl text-center mb-2 text-yellow-400">🧙‍♂️ 參與勇者職業分佈</h3>
+                    <div class="h-64"><canvas id="subjectChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- 數據表格區 -->
+            <div class="rpg-box p-4 bg-gray-900 overflow-x-auto">
+                <h3 class="text-xl mb-4 text-yellow-400">📜 任務回報日誌 (即時更新)</h3>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>時間</th>
+                            <th>代號(姓名)</th>
+                            <th>任教學校</th>
+                            <th>職業</th>
+                            <th>內容</th>
+                            <th>講師</th>
+                            <th>場地</th>
+                            <th>收穫 / 建議</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="responsesTableBody">
+                        <tr><td colspan="9" class="text-center text-gray-500 py-4">載入紀錄中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 編輯 Modal ==================== -->
+    <div id="editModal" class="modal">
+        <div class="rpg-box p-6 w-full max-w-md">
+            <h2 class="text-2xl text-yellow-400 mb-4">✏️ 編輯任務紀錄</h2>
+            <form id="editForm" class="space-y-4">
+                <input type="hidden" id="editId">
+                <div>
+                    <label class="block text-sm mb-1">勇者代號</label>
+                    <input type="text" id="editName" class="w-full p-2 rpg-input text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">任教學校</label>
+                    <input type="text" id="editSchool" class="w-full p-2 rpg-input text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">內容/講師/場地評分 (1-5)</label>
+                    <div class="flex space-x-2">
+                        <input type="number" id="editRatingC" min="1" max="5" class="w-1/3 p-2 rpg-input text-sm text-center">
+                        <input type="number" id="editRatingS" min="1" max="5" class="w-1/3 p-2 rpg-input text-sm text-center">
+                        <input type="number" id="editRatingV" min="1" max="5" class="w-1/3 p-2 rpg-input text-sm text-center">
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-2 mt-6">
+                    <button type="button" onclick="closeEditModal()" class="rpg-btn px-4 py-2 text-sm">取消</button>
+                    <button type="submit" class="rpg-btn px-4 py-2 text-sm bg-yellow-900 border-yellow-400 text-yellow-400">💾 更新</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 訊息提示框 -->
+    <div id="toastMessage" class="fixed top-4 right-4 bg-gray-800 text-white border-2 border-yellow-400 px-4 py-2 rounded shadow-lg hidden z-50"></div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Firebase 初始化
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    let currentUser = null;
+    let surveyData = []; // 儲存供儀表板使用的資料
+    
+    // 圖表實例
+    let ratingChartInst = null;
+    let subjectChartInst = null;
+
+    // ----- 共用與認證 -----
+    async function initAuth() {
+        try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                const userCredential = await signInWithCustomToken(auth, __initial_auth_token);
+                currentUser = userCredential.user;
+            } else {
+                const userCredential = await signInAnonymously(auth);
+                currentUser = userCredential.user;
+            }
+            initDashboard(); // 登入後初始化後台資料監聽
+        } catch (error) {
+            console.error("認證失敗:", error);
+            document.getElementById('dashboardStatus').textContent = "⚠️ 連線失敗";
+        }
+    }
+    initAuth();
+
+    function showToast(msg) {
+        const t = document.getElementById('toastMessage');
+        t.textContent = msg;
+        t.classList.remove('hidden');
+        setTimeout(() => t.classList.add('hidden'), 3000);
+    }
+
+    // ----- 視圖切換邏輯 -----
+    const btnFront = document.getElementById('nav-frontend');
+    const btnBack = document.getElementById('nav-backend');
+    const viewFront = document.getElementById('frontend-view');
+    const viewBack = document.getElementById('backend-view');
+
+    btnFront.addEventListener('click', () => {
+        viewFront.classList.add('active'); viewBack.classList.remove('active');
+        btnFront.classList.add('bg-yellow-900', 'text-yellow-400', 'border-yellow-400');
+        btnBack.classList.remove('bg-yellow-900', 'text-yellow-400', 'border-yellow-400');
+    });
+    btnBack.addEventListener('click', () => {
+        viewBack.classList.add('active'); viewFront.classList.remove('active');
+        btnBack.classList.add('bg-yellow-900', 'text-yellow-400', 'border-yellow-400');
+        btnFront.classList.remove('bg-yellow-900', 'text-yellow-400', 'border-yellow-400');
+    });
+
+
+    // ==================== 前台：問卷邏輯 ====================
+    let currentStep = 1;
+    const totalSteps = 3;
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const form = document.getElementById('feedbackForm');
+
+    function updateUI() {
+        for (let i = 1; i <= totalSteps; i++) {
+            document.getElementById(`step-${i}`).classList.remove('active');
+        }
+        document.getElementById(`step-${currentStep}`).classList.add('active');
+
+        const progress = ((currentStep - 1) / (totalSteps - 1)) * 100;
+        document.getElementById('progressBar').style.width = `${progress}%`;
+        document.getElementById('expText').textContent = `EXP: ${progress}%`;
+        
+        for (let i = 1; i <= totalSteps; i++) {
+            const ind = document.getElementById(`indicator-${i}`);
+            if (ind) {
+                if (i === currentStep) { ind.classList.add('text-yellow-400'); ind.classList.remove('text-gray-600'); } 
+                else { ind.classList.remove('text-yellow-400'); ind.classList.add('text-gray-600'); }
+            }
+        }
+        prevBtn.classList.toggle('hidden', currentStep === 1);
+        if (currentStep === totalSteps) {
+            nextBtn.classList.add('hidden'); submitBtn.classList.remove('hidden');
+        } else {
+            nextBtn.classList.remove('hidden'); submitBtn.classList.add('hidden');
+        }
+    }
+
+    function validateStep() {
+        const currentContent = document.getElementById(`step-${currentStep}`);
+        const inputs = currentContent.querySelectorAll('input[required]');
+        let isValid = true;
+
+        inputs.forEach(input => {
+            if(input.type === 'text' && !input.value.trim()) {
+                isValid = false; input.classList.add('border-red-500', 'bg-red-900', 'bg-opacity-50');
+            } else {
+                input.classList.remove('border-red-500', 'bg-red-900', 'bg-opacity-50');
+            }
+        });
+
+        if (currentStep === 2) {
+            const radioGroups = ['ratingContent', 'ratingSpeaker', 'ratingVenue'];
+            radioGroups.forEach(groupName => {
+                const checked = document.querySelector(`input[name="${groupName}"]:checked`);
+                if (!checked) isValid = false;
+            });
+            const warningEl = document.getElementById('ratingWarning');
+            if(!isValid && warningEl) warningEl.classList.remove('hidden');
+            else if (warningEl) warningEl.classList.add('hidden');
+        }
+        return isValid;
+    }
+
+    nextBtn.addEventListener('click', () => { if (validateStep()) { currentStep++; updateUI(); } });
+    prevBtn.addEventListener('click', () => { currentStep--; updateUI(); });
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if(!validateStep()) return;
+
+        document.getElementById('submitText').textContent = '處理中...';
+        document.getElementById('loadingIcon').classList.remove('hidden');
+        submitBtn.disabled = true;
+
+        try {
+            if (!currentUser) throw new Error("尚未連線");
+
+            const formData = {
+                name: document.getElementById('userName').value,
+                school: document.getElementById('schoolName').value,
+                subject: document.getElementById('subject').value || '未填寫',
+                ratings: {
+                    content: parseInt(document.querySelector('input[name="ratingContent"]:checked')?.value || 0),
+                    speaker: parseInt(document.querySelector('input[name="ratingSpeaker"]:checked')?.value || 0),
+                    venue: parseInt(document.querySelector('input[name="ratingVenue"]:checked')?.value || 0),
+                },
+                feedbackHelpful: document.getElementById('feedbackHelpful').value,
+                feedbackFuture: document.getElementById('feedbackFuture').value,
+                timestamp: new Date().toISOString(),
+                userId: currentUser.uid
+            };
+
+            // 1. 寫入 Firestore (後台圖表與編輯用這個)
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'survey_responses');
+            await addDoc(colRef, formData);
+
+            // 2. 背景傳送給 Google Sheets (保留備份功能)
+            const gasUrl = "https://script.google.com/macros/s/AKfycbwindH0YbFK3TTdDcDe29L1FN95ZeTYpHQAxhS9LXxRHPjzZJwJW31qP8BRsLu3ThPJ/exec"; 
+            if (gasUrl && gasUrl.startsWith("http")) {
+                const sheetData = {
+                    name: formData.name,
+                    school: formData.school,
+                    subject: formData.subject,
+                    ratingContent: formData.ratings.content,
+                    ratingSpeaker: formData.ratings.speaker,
+                    ratingVenue: formData.ratings.venue,
+                    feedbackHelpful: formData.feedbackHelpful,
+                    feedbackFuture: formData.feedbackFuture
+                };
+
+                // 修改：使用 text/plain 發送 JSON 字串，避免 CORS 預檢錯誤
+                fetch(gasUrl, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(sheetData)
+                }).catch(err => console.log("GAS Sync error", err));
+            }
+
+            document.getElementById(`step-${currentStep}`).classList.remove('active');
+            document.getElementById('action-buttons').classList.add('hidden');
+            document.getElementById('step-success').classList.add('active');
+        } catch (error) {
+            console.error("送出錯誤:", error);
+            alert("任務回報失敗，請重試！");
+            submitBtn.disabled = false;
+            document.getElementById('submitText').textContent = '💾 儲存並回報';
+            document.getElementById('loadingIcon').classList.add('hidden');
+        }
+    });
+
+    // ==================== 後台：Dashboard 邏輯 ====================
+    function initDashboard() {
+        if (!currentUser) return;
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'survey_responses');
+        
+        // 為了避免 Firebase 需要複雜 Index，使用簡單查詢然後在前端排序
+        onSnapshot(colRef, (snapshot) => {
+            document.getElementById('dashboardStatus').textContent = "🟢 即時連線中";
+            surveyData = [];
+            snapshot.forEach((doc) => {
+                surveyData.push({ id: doc.id, ...doc.data() });
+            });
+            // 依時間排序(新到舊)
+            surveyData.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            updateDashboardCharts();
+            updateDashboardTable();
+        }, (error) => {
+            console.error("資料監聽失敗:", error);
+            document.getElementById('dashboardStatus').textContent = "🔴 連線中斷";
+        });
+    }
+
+    function updateDashboardCharts() {
+        if(surveyData.length === 0) return;
+
+        // 計算平均滿意度
+        let sumC = 0, sumS = 0, sumV = 0;
+        let subjectsCount = {};
+        
+        surveyData.forEach(d => {
+            sumC += (d.ratings?.content || 0);
+            sumS += (d.ratings?.speaker || 0);
+            sumV += (d.ratings?.venue || 0);
+            
+            const sub = d.subject || '未填寫';
+            subjectsCount[sub] = (subjectsCount[sub] || 0) + 1;
+        });
+
+        const avgC = (sumC / surveyData.length).toFixed(1);
+        const avgS = (sumS / surveyData.length).toFixed(1);
+        const avgV = (sumV / surveyData.length).toFixed(1);
+
+        // Chart.js 共同樣式
+        Chart.defaults.color = '#ccc';
+        Chart.defaults.font.family = "'DotGothic16', monospace";
+
+        // 1. 長條圖 (評分)
+        const ctxRating = document.getElementById('ratingChart').getContext('2d');
+        if(ratingChartInst) ratingChartInst.destroy();
+        ratingChartInst = new Chart(ctxRating, {
+            type: 'bar',
+            data: {
+                labels: ['內容實用度', '講師表達', '場地行政'],
+                datasets: [{
+                    label: '平均滿意度 (滿分5)',
+                    data: [avgC, avgS, avgV],
+                    backgroundColor: ['rgba(59, 130, 246, 0.7)', 'rgba(16, 185, 129, 0.7)', 'rgba(245, 158, 11, 0.7)'],
+                    borderColor: ['#3b82f6', '#10b981', '#f59e0b'],
+                    borderWidth: 1
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 5 } } }
+        });
+
+        // 2. 圓餅圖 (職業)
+        const ctxSubject = document.getElementById('subjectChart').getContext('2d');
+        if(subjectChartInst) subjectChartInst.destroy();
+        subjectChartInst = new Chart(ctxSubject, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(subjectsCount),
+                datasets: [{
+                    data: Object.values(subjectsCount),
+                    backgroundColor: [ '#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6', '#9ca3af' ],
+                    borderWidth: 1, borderColor: '#000'
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+        });
+    }
+
+    function updateDashboardTable() {
+        const tbody = document.getElementById('responsesTableBody');
+        tbody.innerHTML = '';
+        if (surveyData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4">目前沒有任何任務紀錄。</td></tr>';
+            return;
+        }
+
+        surveyData.forEach(d => {
+            const tr = document.createElement('tr');
+            const dateStr = new Date(d.timestamp).toLocaleString('zh-TW', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'});
+            
+            tr.innerHTML = `
+                <td class="text-xs text-gray-400 whitespace-nowrap">${dateStr}</td>
+                <td class="font-bold">${d.name || '-'}</td>
+                <td class="text-gray-300">${d.school || '-'}</td>
+                <td class="text-yellow-400">${d.subject || '-'}</td>
+                <td class="text-center">${d.ratings?.content || '-'}</td>
+                <td class="text-center">${d.ratings?.speaker || '-'}</td>
+                <td class="text-center">${d.ratings?.venue || '-'}</td>
+                <td class="text-xs max-w-xs truncate" title="${d.feedbackHelpful}\n${d.feedbackFuture}">
+                    ${d.feedbackHelpful ? '💎 ' + d.feedbackHelpful : ''}
+                </td>
+                <td class="space-x-1 whitespace-nowrap">
+                    <button class="bg-blue-900 text-blue-200 px-2 py-1 rounded text-xs hover:bg-blue-700" onclick="window.openEditModal('${d.id}')">編輯</button>
+                    <button class="bg-red-900 text-red-200 px-2 py-1 rounded text-xs hover:bg-red-700" onclick="window.deleteRecord('${d.id}')">刪除</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // ==================== 編輯與刪除功能 (暴露至 Global Window) ====================
+    window.openEditModal = (id) => {
+        const record = surveyData.find(d => d.id === id);
+        if(!record) return;
+        
+        document.getElementById('editId').value = id;
+        document.getElementById('editName').value = record.name;
+        document.getElementById('editSchool').value = record.school;
+        document.getElementById('editRatingC').value = record.ratings?.content || 0;
+        document.getElementById('editRatingS').value = record.ratings?.speaker || 0;
+        document.getElementById('editRatingV').value = record.ratings?.venue || 0;
+        
+        document.getElementById('editModal').classList.add('active');
+    };
+
+    window.closeEditModal = () => {
+        document.getElementById('editModal').classList.remove('active');
+    };
+
+    document.getElementById('editForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('editId').value;
+        if(!id || !currentUser) return;
+
+        try {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'survey_responses', id);
+            await updateDoc(docRef, {
+                name: document.getElementById('editName').value,
+                school: document.getElementById('editSchool').value,
+                'ratings.content': parseInt(document.getElementById('editRatingC').value),
+                'ratings.speaker': parseInt(document.getElementById('editRatingS').value),
+                'ratings.venue': parseInt(document.getElementById('editRatingV').value),
+            });
+            window.closeEditModal();
+            showToast("紀錄更新成功！");
+        } catch (error) {
+            console.error("更新失敗", error);
+            alert("更新失敗");
+        }
+    });
+
+    window.deleteRecord = async (id) => {
+        if(confirm("確定要刪除這筆任務紀錄嗎？刪除後無法恢復。")) {
+            try {
+                if(!currentUser) return;
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'survey_responses', id);
+                await deleteDoc(docRef);
+                showToast("紀錄已刪除");
+            } catch (error) {
+                console.error("刪除失敗", error);
+                alert("刪除失敗");
+            }
+        }
+    };
+
+</script>
+</body>
+</html>
